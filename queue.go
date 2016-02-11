@@ -2,12 +2,13 @@
 // but unbounded subtasks such that:
 //
 // - When the queue is unlocked, an arbitrary number of subtasks can run concurrently without
-//   any delay
+// any delay
 // - When the queue is locked, an arbitrary number of subtasks can be submitted without locking
-//   the calling thread, but will queue and executed only once the queue is later unlocked
+// the calling thread, but will queue and executed only once the queue is later unlocked
 // - When the queue is locked, a request to lock the queue again fails, returning immediately with
-//   a `false` Boolean value
+// a `false` Boolean value
 // - When a request is made to lock the queue, all extant subtasks already being executed are
+// allowed to finish before the lock is obtained.
 package waitqueue
 
 import (
