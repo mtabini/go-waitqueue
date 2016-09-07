@@ -103,3 +103,44 @@ func (w *WaitQueue) Unlock() {
 		w.work.Unlock()
 	}
 }
+
+// BoundedMutuallyExclusiveWaitQueue is a work queue that allows a bounded number of tasks to execute
+// at any one time, but only one of a particular task type
+type BoundedMutuallyExclusiveWaitQueue struct {
+	sem    chan int
+	queues map[string]*WaitQueue
+}
+
+// New returns a new BoundedMutuallyExclusiveWaitQueue ready for use.
+func NewBounded(size int, queueName string, additionalQueueNames ...string) *BoundedMutuallyExclusiveWaitQueue {
+	queues := map[string]*WaitQueue{}
+	queues[queueName] = New()
+
+	for _, additionalQueueName := range additionalQueueNames {
+		queues[additionalQueueName] = New()
+	}
+
+	return &BoundedMutuallyExclusiveWaitQueue{
+		sem: make(chan int, size),
+		queues: queues,
+	}
+}
+
+
+func (w *BoundedMutuallyExclusiveWaitQueue) Lock(name string) bool {
+	locked := w.queues[name].Lock()
+	if locked {
+		w.sem <- 1
+	}
+
+	return locked
+}
+
+func (w *BoundedMutuallyExclusiveWaitQueue) Unlock(name string) {
+	w.queues[name].Unlock()
+	<-w.sem
+}
+
+func (w *BoundedMutuallyExclusiveWaitQueue) ExecuteOrDefer(name string, closure func() error) error {
+	return w.queues[name].ExecuteOrDefer(closure)
+}

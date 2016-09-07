@@ -280,3 +280,126 @@ func BenchmarkLockedQueue(b *testing.B) {
 
 	wg.Wait()
 }
+
+func TestBoundedMutuallyExclusiveWaitQueue(t *testing.T) {
+	q := NewBounded(2, "group 1", "group 2", "group 3", "group 4")
+
+	if !q.Lock("group 1") {
+		t.Fatal("Unable to lock empty queue")
+	}
+
+	if q.Lock("group 1") {
+		t.Fatal("Able to double-lock queue")
+	}
+
+	if !q.Lock("group 2") {
+		t.Fatal("Unable to lock queue of different name")
+	}
+
+	wg := sync.WaitGroup{}
+
+	wg.Add(2)
+
+	closure := func(group string) {
+		q.ExecuteOrDefer(group, func() error {
+			wg.Done()
+			return nil
+		})
+	}
+
+	go closure("group 1")
+	go closure("group 2")
+
+	c := make(chan struct{})
+
+	go func() {
+		defer close(c)
+		wg.Wait()
+	}()
+
+	select {
+	case <-time.After(time.Second):
+
+	case <-c:
+		t.Fatal("Closures are running on a locked queue")
+	}
+
+	q.Unlock("group 1")
+	q.Unlock("group 2")
+
+	select {
+	case <-time.After(time.Second):
+		t.Fatal("Closures are not running after a queue has been unlocked")
+
+	case <-c:
+	}
+
+	quit := make(chan int)
+	working := make(chan int)
+
+	runTestFunc := func(group string) {
+		q.Lock(group)
+		defer q.Unlock(group)
+		working <- 1
+		<-quit
+	}
+
+	go runTestFunc("group 1")
+
+	select {
+	case <-time.After(time.Second):
+		t.Fatal("group 1 did not start work")
+	case <-working:
+	}
+
+	go runTestFunc("group 2")
+
+	select {
+	case <-time.After(time.Second):
+		t.Fatal("Group 2 did not start work")
+	case <-working:
+	}
+
+	go runTestFunc("group 3")
+
+	select {
+	case <-time.After(time.Second):
+
+	case <-working:
+		t.Fatal("Group 3 started work prematurely")
+	}
+
+	go runTestFunc("group 4")
+
+	select {
+	case <-time.After(time.Second):
+
+	case <-working:
+		t.Fatal("Group 4 started work prematurely")
+	}
+
+	quit <- 1
+
+	select {
+	case <-time.After(time.Second):
+		t.Fatal("Group did not start work")
+	case <-working:
+	}
+
+	select {
+	case <-time.After(time.Second):
+
+	case <-working:
+		t.Fatal("Group started work prematurely")
+	}
+
+	quit <- 1
+
+	select {
+	case <-time.After(time.Second):
+		t.Fatal("Group did not start work")
+	case <-working:
+	}
+	close(working)
+	close(quit)
+}
