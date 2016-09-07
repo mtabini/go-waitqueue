@@ -140,7 +140,7 @@ func TestPrecedence(t *testing.T) {
 		for {
 			select {
 			case <-c:
-				count += 1
+				count++
 				if count >= 2 {
 					cc <- struct{}{}
 				}

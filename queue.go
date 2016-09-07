@@ -104,14 +104,18 @@ func (w *WaitQueue) Unlock() {
 	}
 }
 
-// BoundedMutuallyExclusiveWaitQueue is a work queue that allows a bounded number of tasks to execute
-// at any one time, but only one of a particular task type
+// BoundedMutuallyExclusiveWaitQueue represents a work queue that allows a bounded number of tasks to execute
+// concurrently, where each task can be assigned to its own sequential queue.
 type BoundedMutuallyExclusiveWaitQueue struct {
 	sem    chan int
 	queues map[string]*WaitQueue
 }
 
-// New returns a new BoundedMutuallyExclusiveWaitQueue ready for use.
+// NewBounded returns a new BoundedMutuallyExclusiveWaitQueue ready for use.
+// `size` is a positive integer indicating the maximum number of queues that can
+// be locked concurrently.
+// `queueName` is the name of the queue to manage.
+// `additionalQueueNames` are the names of any other queues to manage.
 func NewBounded(size int, queueName string, additionalQueueNames ...string) *BoundedMutuallyExclusiveWaitQueue {
 	queues := map[string]*WaitQueue{}
 	queues[queueName] = New()
@@ -126,9 +130,16 @@ func NewBounded(size int, queueName string, additionalQueueNames ...string) *Bou
 	}
 }
 
-
+// Lock obtains an exclusive lock on the queue identified by `name`. If the lock
+// can be obtained, Lock checks that there are sufficient resources available
+// (See BoundedMutuallyExclusiveWaitQueue.NewBounded for details on setting global
+// resource constraints), blocking in the case that there are not.
+// With the exception of this behavior, Lock functions the same as WaitQueue.Lock.
 func (w *BoundedMutuallyExclusiveWaitQueue) Lock(name string) bool {
 	locked := w.queues[name].Lock()
+
+	// If we obtain the lock, we block until there are sufficient resources to
+	// perform work.
 	if locked {
 		w.sem <- 1
 	}
@@ -136,11 +147,16 @@ func (w *BoundedMutuallyExclusiveWaitQueue) Lock(name string) bool {
 	return locked
 }
 
+// Unlock unlocks the queue identified by `name`. See WaitQueue.Unlock for further details.
 func (w *BoundedMutuallyExclusiveWaitQueue) Unlock(name string) {
 	w.queues[name].Unlock()
 	<-w.sem
 }
 
+// ExecuteOrDefer executes `closure` synchronously if queue `name` is unlocked,
+// and returns nil on success, or `closure`'s error information otherwise.
+// If queue `name` is locked, ExecuteOrDefer instead schedules `closure` for asynchronous execution
+// once queue `name` becomes unlocked, and returns immediately with ``nil``.
 func (w *BoundedMutuallyExclusiveWaitQueue) ExecuteOrDefer(name string, closure func() error) error {
 	return w.queues[name].ExecuteOrDefer(closure)
 }
