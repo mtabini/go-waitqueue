@@ -3,6 +3,7 @@ package waitqueue
 import (
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -107,6 +108,47 @@ func TestLockedConcurrency(t *testing.T) {
 		t.Fatal("Closures are not running on after a queue has been unlocked")
 
 	case <-c:
+	}
+}
+
+func TestExecuteAndDefer(t *testing.T) {
+	q := NewBounded(1, "test")
+
+	q.Lock("test")
+
+	var count int64
+
+	c := make(chan bool, 1)
+
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+
+	closure := func() error {
+		if <-c {
+			defer wg.Done()
+		}
+
+		atomic.AddInt64(&count, 1)
+
+		return nil
+	}
+
+	c <- false
+
+	q.ExecuteAndDefer("test", closure)
+
+	if count != 1 {
+		t.Fatal("Expected count to be 1 because the closure should execute even if the queue is locked")
+	}
+
+	c <- true
+
+	q.Unlock("test")
+
+	wg.Wait()
+
+	if count != 2 {
+		t.Fatal("Expected count to be 2 because the closure should execute again after the queue is unlocked")
 	}
 }
 

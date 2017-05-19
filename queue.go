@@ -27,10 +27,7 @@ func New() *WaitQueue {
 	return &WaitQueue{}
 }
 
-// ExecuteOrDefer executes a subtask synchronously if the queue is unlocked, and returns its result. If
-// the queue is locked, it instead schedules the subtask for asynchronous execution once the queue becomes
-// unlocked, and returns immediately with a nil value.
-func (w *WaitQueue) ExecuteOrDefer(closure func() error) error {
+func (w *WaitQueue) executeAndOrDefer(closure func() error, executeIfLocked bool) error {
 	// Acquire a read lock on `locked`. This ensures that:
 	// (a) w.locked won't change under our feet, which means that a Lock operation
 	//     won't start until we're done here.
@@ -53,13 +50,33 @@ func (w *WaitQueue) ExecuteOrDefer(closure func() error) error {
 			closure()
 		}()
 
-		return nil
+		// If the caller didn't want us to run the closure even if
+		// the queue is locked, we return here
+
+		if !executeIfLocked {
+			return nil
+		}
 	}
 
 	// If execution reaches this line, the queue is unlocked and
-	// we can run our closure
+	// we can run our closure, or the caller requested that the
+	// closure be run even if the queue was locked.
 
 	return closure()
+}
+
+// ExecuteOrDefer executes a subtask synchronously if the queue is unlocked, and returns its result. If
+// the queue is locked, it instead schedules the subtask for asynchronous execution once the queue becomes
+// unlocked, and returns immediately with a nil value.
+func (w *WaitQueue) ExecuteOrDefer(closure func() error) error {
+	return w.executeAndOrDefer(closure, false)
+}
+
+// ExecuteAndDefer works like ExecuteOrDefer, but causes the closure to be execute immediately regardless
+// of the state of the queue. If the queue is locked, it is also rescheduled for later execution after
+// unlocking.
+func (w *WaitQueue) ExecuteAndDefer(closure func() error) error {
+	return w.executeAndOrDefer(closure, true)
 }
 
 // Lock locks the queue, waiting first for any extant subtasks to complete. No more
@@ -125,7 +142,7 @@ func NewBounded(size int, queueName string, additionalQueueNames ...string) *Bou
 	}
 
 	return &BoundedMutuallyExclusiveWaitQueue{
-		sem: make(chan int, size),
+		sem:    make(chan int, size),
 		queues: queues,
 	}
 }
@@ -159,4 +176,11 @@ func (w *BoundedMutuallyExclusiveWaitQueue) Unlock(name string) {
 // once queue `name` becomes unlocked, and returns immediately with ``nil``.
 func (w *BoundedMutuallyExclusiveWaitQueue) ExecuteOrDefer(name string, closure func() error) error {
 	return w.queues[name].ExecuteOrDefer(closure)
+}
+
+// ExecuteAndDefer executes `closure` synchronously. and returns nil on success, or `closure`'s
+// error information otherwise. If queue `name` is locked, ExecuteAndDefer also schedules `closure`
+// for asynchronous execution once queue `name` becomes unlocked.
+func (w *BoundedMutuallyExclusiveWaitQueue) ExecuteAndDefer(name string, closure func() error) error {
+	return w.queues[name].ExecuteAndDefer(closure)
 }
